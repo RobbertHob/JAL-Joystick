@@ -1,0 +1,433 @@
+-- Title: Joystick port to usb-conversion
+-- RobbertHob, 2015
+-- Based on: 
+--    blog_part3.jal, part of jallib (http://jallib.googlecode.com)
+--    by Albert Faber 2008..2009
+
+-- Released under the BSD license (http://www.opensource.org/licenses/bsd-license.php)
+
+
+-- chip setup
+include 18f45k50
+alias PIR2_USBIF is PIR3_USBIF
+alias PIE2_USBIE is PIE3_USBIE
+OSCCON_IRCF = 0b111 -- Internal Oscillator 16MHz
+OSCTUNE_SPLLMULT = 0b1 -- 3xPLL
+OSCCON2_PLLEN  =  0b1 -- enable
+_usec_delay(1_000_000)
+
+analog_off()
+adc_off()
+enable_digital_io()
+procedure bank_0 is
+end procedure
+procedure bank_1 is
+end procedure
+
+
+const Ask_Library_IDentity = False
+pragma target clock 48_000_000     -- oscillator frequency
+--pragma target clock 16_000_000     -- oscillator frequency
+-- configuration memory settings (fuses)
+--pragma target OSC  HS              -- HS crystal or resonator
+pragma target WDT  disabled        -- no watchdog
+pragma target XINST disabled       -- not supported by JalV2
+pragma target LVP  disabled        -- no Low Voltage Programming
+pragma target MCLR external        -- reset externally
+
+
+
+    		pragma target	PLLSEL  PLL3X		;3x clock multiplier
+    		pragma target	PLLEN  DISABLED		;PLL Disabled (firmware controlled)
+    		pragma target	CPUDIV  P1	;CPU uses system clock (no divide)
+    		pragma target	LS48MHZ  P8	;System clock at 48 MHz, USB clock divider is set to 8
+    		pragma target	OSC  INTOSC_CLKOUT ;INTOSCIO		;Internal oscillator
+    		pragma target	PCLKEN  ENABLED		;Primary oscillator enabled
+    		pragma target	FCMEN  DISABLED		;Fail-Safe Clock Monitor disabled
+    		pragma target	IESO  DISABLED		;Oscillator Switchover mode disabled
+    		pragma target	PWRTE  ENABLED		;Power up timer enabled
+    		pragma target	BROWNOUT  DISABLED		;BOR disabled in hardware (SBOREN is ignored)
+		pragma target	VOLTAGE  V19		;BOR set to 1.9V nominal
+		pragma target	nLPBOR  DISABLED		;Low-Power Brown-out Reset disabled
+		pragma target	WDT  DISABLED		;WDT disabled in hardware (SWDTEN ignored)
+		pragma target	WDTPS  P1            	;1:1
+		pragma target	CCP2MUX  PIN_C1		;CCP2 input/output is multiplexed with RC1
+		pragma target	PBADEN  DIGITAL		;PORTB<5:0> pins are configured as digital I/O on Reset
+		pragma target	T3CKMUX  PIN_C0		;T3CKI function is on RC0
+		pragma target	SDOMUX  PIN_B3		;SDO function is on RB3
+		pragma target	MCLR  EXTERNAL		;MCLR pin enabled RE3 input pin disabled
+		pragma target	STVR  DISABLED		;Stack full/underflow will not cause Reset
+		pragma target	LVP  DISABLED		;Single-Supply ICSP disabled
+		pragma target	ICPRT  DISABLED		;ICPORT disabled
+		pragma target	XINST  DISABLED		;Instruction set extension and Indexed Addressing mode disabled
+		pragma target	DEBUG  DISABLED		;Background debugger disabled, RB6 and RB7 configured as general purpose I/O pins
+		pragma target	CP0  DISABLED		;Block 0 (000800-001FFFh) or (001000-001FFFh) is not code-protected
+		pragma target	CP1  DISABLED		;Block 1 (002000-003FFFh) is not code-protected
+		pragma target	CPB  DISABLED		;Boot block (000000-0007FFh) or (000000-000FFFh) is not code-protected
+		pragma target	WRT0  DISABLED		;Block 0 (000800-001FFFh) or (001000-001FFFh) is not write-protected
+		pragma target	WRT1  DISABLED		;Block 1 (002000-003FFFh) is not write-protected
+		pragma target	WRTC  DISABLED		;Configuration registers (300000-3000FFh) are not write-protected
+		pragma target	WRTB  DISABLED		;Boot block (000000-0007FFh) or (000000-000FFFh) is not write-protected
+		pragma target	EBTR0  DISABLED		;Block 0 (000800-001FFFh) or (001000-001FFFh) is not protected from table reads executed in other blocks
+		pragma target	EBTR1  DISABLED		;Block 1 (002000-003FFFh) is not protected from table reads executed in other blocks
+		pragma target	EBTRB  DISABLED		;Boot block (000000-0007FFh) or (000000-000FFFh) is not protected from table reads executed in other blocks
+
+                                            
+-- These configuration bit settings are only a selection, sufficient for
+-- this program, but other programs may need more or different settings.
+portb_direction = ALL_Output
+
+const USART_HW_Serial     = true     
+const Serial_HW_Baudrate  = 115_200
+include JALLIB_serial_hardware
+Serial_HW_init
+
+
+serial_hw_write(0xAB)           
+serial_hw_write(0xCD)           
+serial_hw_write(0xEF)           
+					           
+					           
+const bit enhanced_flash_eeprom = true
+
+
+include delay
+
+const bit USB_DEBUG = false
+const bit USB_DEBUG_HIGH = false
+const bit USB_HID_DEBUG = false
+const bit USB_HID_DEBUG_HIGH = false
+const byte USB_HID_ENDPOINT = 0x01
+
+include usb_defs
+
+const bit USB_EP0 = 1
+const byte USB_EP0_OUT_SIZE = 8
+const word USB_EP0_OUT_ADDR = ( USB_BASE_ADDRESS + 0x0010 )
+const byte USB_EP0_IN_SIZE  = 8
+const word USB_EP0_IN_ADDR  = ( USB_EP0_OUT_ADDR + USB_EP0_OUT_SIZE )
+
+const bit USB_EP1 = 1
+const byte USB_EP1_OUT_SIZE = 8
+const word USB_EP1_OUT_ADDR = ( USB_EP0_IN_ADDR + USB_EP0_IN_SIZE )
+const byte USB_EP1_IN_SIZE  = 8
+const word USB_EP1_IN_ADDR  = ( USB_EP1_OUT_ADDR + USB_EP1_OUT_SIZE )
+
+var volatile byte  usb_ep1in_buf[ 8 ] at USB_EP1_IN_ADDR
+
+const bit USB_EP2 = 0
+const byte USB_EP2_OUT_SIZE = 8
+const word USB_EP2_OUT_ADDR = 0x0000
+const byte USB_EP2_IN_SIZE  = 8
+const word USB_EP2_IN_ADDR  = 0x0000
+
+const bit USB_EP3 = 0
+const byte USB_EP3_OUT_SIZE = 8
+const word USB_EP3_OUT_ADDR = 0x0000
+const byte USB_EP3_IN_SIZE = 8
+const word USB_EP3_IN_ADDR  = 0x0000
+
+const byte USB_DEVICE_DESCRIPTOR[USB_DEVICE_DESCRIPTOR_SIZE] = {
+	USB_DEVICE_DESCRIPTOR_SIZE, 	-- 18 bytes long
+	USB_DT_DEVICE, 	-- DEVICE 01h
+	0x00,
+	0x02,		-- usb version 2.00
+	0x00,		-- class
+	0x00,		-- subclass
+	0x00,		-- protocol
+	USB_EP0_OUT_SIZE,		-- max packet size for end point 0
+	0xd8,
+	0x04,		-- Microchip's vendor
+	0x55,
+	0x00,		-- Microchip keyboard demo
+	0x01,
+	0x00, 	     -- version 1.0 of the product
+	0x01,		-- string 1 for manufacturer
+	0x02,		-- string 2 for product
+	0x00,		-- string 3 for serial number
+	0x01		-- number of configurations
+}
+
+
+
+
+const byte USB_HID_REPORT1[]=
+{
+  0x05, 0x01,    -- USAGE_PAGE (Generic Desktop)	
+  0x15, 0x00,    -- LOGICAL_MINIMUM (0)	 
+  0x09, 0x04,    -- USAGE (Joystick)	
+  0xA1, 0x01,    -- COLLECTION (Application)	 
+	  0x05, 0x02,    -- USAGE_PAGE (Simulation Controls)	
+	  0x09, 0xBB,    -- USAGE (Throttle)	
+	  0x15, 0x81,    -- LOGICAL_MINIMUM (-127)	 
+	  0x25, 0x7F,    -- LOGICAL_MAXIMUM (127)	 
+	  0x75, 0x08,    -- REPORT_SIZE (8)	 
+	  0x95, 0x01,    -- REPORT_COUNT (1) 
+	  0x81, 0x02,    -- INPUT (Data,Var,Abs)	 
+	  0x05, 0x01,    -- USAGE_PAGE (Generic Desktop)	
+	  0x09, 0x01,    -- USAGE (Pointer)	
+	  0xA1, 0x00,    -- COLLECTION (Physical)	 
+	    0x09, 0x30,   -- USAGE (X)	
+	    0x09, 0x31,   -- USAGE (Y)	
+	    0x95, 0x02,   -- REPORT_COUNT (2)	 
+	    0x81, 0x02,  -- INPUT (Data,Var,Abs)	 
+	  0xC0,          -- END_COLLECTION	
+	  0x09, 0x39, -- USAGE (Hat switch)	
+	  0x15, 0x00, -- LOGICAL_MINIMUM (0)	 
+	  0x25, 0x03, -- LOGICAL_MAXIMUM (3)	 
+	  0x35, 0x00, -- PHYSICAL_MINIMUM (0)	 
+	  0x46, 0x0E, 0x01, -- PHYSICAL_MAXIMUM (270)	 
+	  0x65, 0x14, -- UNIT (Eng Rot:Angular Pos)	 
+	  0x75, 0x04, -- REPORT_SIZE (4)	 
+	  0x95, 0x01, -- REPORT_COUNT (1)	 
+	  0x81, 0x02, -- INPUT (Data,Var,Abs)	 
+	  0x05, 0x09, -- USAGE_PAGE (Button)	
+	  0x19, 0x01, -- USAGE_MINIMUM (Button 1)	
+	  0x29, 0x04, -- USAGE_MAXIMUM (Button 4)	
+	  0x15, 0x00, -- LOGICAL_MINIMUM (0)	 
+	  0x25, 0x01, -- LOGICAL_MAXIMUM (1)	 
+	  0x75, 0x01, -- REPORT_SIZE (1)	 
+	  0x95, 0x04, -- REPORT_COUNT (4)	 
+	  0x55, 0x00, -- UNIT_EXPONENT (0)	 
+	  0x65, 0x00, -- UNIT (None)	 
+	  0x81, 0x02, -- INPUT (Data,Var,Abs)	 
+	0xC0  -- END_COLLECTION	
+}
+
+
+
+
+
+const USB_CONFIGURATION_DESCRIPTOR_SIZE = 0x09 + 0x09 + 0x09 + 0x07
+
+const byte USB_CONFIGURATION_DESCRIPTOR[ USB_CONFIGURATION_DESCRIPTOR_SIZE ]=
+{	
+	-- configuration descriptor - - - - - - - - - - 
+	0x09,	-- length,
+	USB_DT_CONFIGURATION,	-- descriptor_type
+
+	USB_CONFIGURATION_DESCRIPTOR_SIZE,
+	0x00,	-- total_length;
+	
+	0x01,	-- num_interfaces,
+	0x01,	-- configuration_value,
+	0x00,	-- configuration_string_id,
+	0b10000000, -- attributes (bus powered, no remote wake up)
+	100,	-- max_power; (200ma)
+
+	-- interface descriptor - - - - - - - - - - - -
+	0x09,						-- length,
+	USB_DT_INTERFACE,			-- descriptor_type,
+	0x00,						-- interface_number, (starts at zero)
+	0x00,						-- alternate_setting, (no alternatives)
+	0x01,						-- num_endpoints,
+	USB_HID_INTF,				-- interface_class, (HID)
+	0x00, ;USB_BOOT_INTF_SUBCLASS,		-- interface_subclass, (boot)
+	0x00, ;USB_HID_PROTOCOL_KEYBOARD,	-- interface_protocol, (keyboard)
+	0x00,	-- interface_string_id;
+	
+	-- hid descriptor - - - - - - - - - - - - - - -
+	0x09,				-- length,
+	USB_DT_HID,			-- descriptor_type;
+	0x11,
+	0x01,				-- hid_spec in BCD (1.11)
+	0x00,				-- country_code, (0=not country specific)
+	0x01,				-- num_class_descriptors, (1)
+	USB_DT_HID_REPORT,	-- class_descriptor_type; (0x22 = report)
+	(count( USB_HID_REPORT1 ) & 0xFF ),
+	(count( USB_HID_REPORT1 ) >> 8 ),
+	
+	0x07,				-- length,
+	USB_DT_ENDPOINT,	-- descriptor_type,
+	0b10000001,			-- endpoint_address, (Endpoint 1, IN)
+	USB_EPT_INT,		-- attributes; (Interrupt)
+	USB_EP1_IN_SIZE,				
+	0x00,				-- max_packet_size
+	0x01				-- interval (1ms)
+}
+
+const byte USB_STRING0[] = 
+{
+	0x04,	-- bLength
+	USB_DT_STRING,	-- bDescriptorType
+	0x09,	-- wLANGID[0] (low byte)
+	0x04	-- wLANGID[0] (high byte)
+}
+
+const byte USB_STRING1[0x36] = 
+{
+	0x36,	-- bLength
+	USB_DT_STRING,	-- bDescriptorType
+	"M", 0x00, 
+	"i", 0x00, 
+	"c", 0x00, 
+	"r", 0x00, 
+	"o", 0x00, 
+	"c", 0x00, 
+	"h", 0x00, 
+	"i", 0x00, 
+	"p", 0x00, 
+	" ", 0x00,
+	"T", 0x00, 
+	"e", 0x00, 
+	"c", 0x00, 
+	"h", 0x00, 
+	"n", 0x00, 
+	"o", 0x00, 
+	"l", 0x00, 
+	"o", 0x00, 
+	"g", 0x00, 
+	"y", 0x00, 
+	",", 0x00, 
+	" ", 0x00,
+	"I", 0x00, 
+	"n", 0x00, 
+	"c", 0x00, 
+	".", 0x00
+}
+
+
+
+const byte USB_STRING2[42] = 
+{
+	42,	-- bLength
+	USB_DT_STRING,	-- bDescriptorType
+	"S", 0x00, 
+	"u", 0x00, 
+	"p", 0x00, 
+	"e", 0x00, 
+	"r", 0x00, 
+	" ", 0x00, 
+	"J", 0x00, 
+	"o", 0x00, 
+	"y", 0x00, 
+	"s", 0x00,
+	"t", 0x00, 
+	"i", 0x00, 
+	"c", 0x00, 
+	"k", 0x00, 
+	" ", 0x00, 
+	" ", 0x00, 
+	" ", 0x00, 
+	" ", 0x00, 
+	" ", 0x00, 
+	" ", 0x00
+}
+
+-- include remaining USB libraries
+include usb_drv_core
+include usb_drv
+
+-- HID report layout (see USB specification for more details)
+-- 0 Modifier byte
+--		bit
+--		0 LEFT CTRL
+--		1 LEFT SHIFT
+--		2 LEFT ALT
+--		3 LEFT GUI
+--		4 RIGHT CTRL
+--		5 RIGHT SHIFT
+--		6 RIGHT ALT
+--		7 RIGHT GUI
+-- 1 reserved
+-- 2 keycode array (0)
+-- 3 keycode array (1)
+-- 4 keycode array (2)
+-- 5 keycode array (3)
+-- 6 keycode array (4)
+-- 7 keycode array (5)
+var byte hid_report_in[4] = { 0,0,0,0 }
+
+var byte key_value = 4
+alias sw3 is pin_c2
+var bit latched_sw3 = sw3
+
+--var bit send_key_stroke = false 
+
+serial_hw_write(0xA0) 
+-- disable analog unit, all ports set to digital
+enable_digital_io()
+
+serial_hw_write(0xA1) 
+-- setup the USB device
+usb_setup()
+
+serial_hw_write(0xA2) 
+-- enable USB device
+usb_enable_module()
+
+serial_hw_write(0xA3) 
+-- set input where switch is attached to input
+pin_c2_direction = input
+
+serial_hw_write(0xA4) 
+
+Var byte temp
+var word counter = 0
+portd_direction = input
+
+const ADC_NVref    = 0
+include ADC
+ADC_init
+set_analog_pin(0)
+set_analog_pin(1)
+
+portd_direction = ALL_INPUT
+
+
+-- main loop
+forever loop
+	-- poll the usb ISR function on a regular base, in order to 
+	-- serve the USB requests
+;serial_hw_write(0xA5) 
+    usb_handle_isr()
+;serial_hw_write(0xA6)
+
+    ;serial_hw_write(0x56) 
+    ;serial_hw_write(portd&0x0F) 
+    
+    
+    ;serial_hw_write_word(Y) 
+    ;serial_hw_write_word(Result) 
+    ;serial_hw_write_word(adc_read_high_res(1)) 
+    ;delay_100ms(1)
+	
+    -- check if USB device has been configured by the HOST
+    if usb_is_configured()  then
+serial_hw_write(0xA7) 
+
+		    var word Y = adc_read_high_res(0)
+		    
+		    var dword minY = 0b100_0000_0000 - Y
+		    var dword numerator = dword(47*(256/2))*minY
+		    var word denominator = (90/2)*Y -- 90/2 so it just stays within a word
+		    var word Result = numerator / denominator
+		    
+		    ;serial_hw_write_word(Result) 
+		    Y = adc_read_high_res(1)
+		    minY = 0b100_0000_0000 - Y
+		    numerator = dword(47*(256/2))*minY
+		    denominator = (90/2)*Y -- 90/2 so it just stay within a word
+		    var word Result2 = numerator / denominator
+
+        hid_report_in[0] = 0
+        hid_report_in[1] = byte(Result)-0x80
+        hid_report_in[2] = byte(Result2)-0x80
+        hid_report_in[3] = (!portd) << 4--(key_value & 0xF0) | (key_value >> 4)
+      
+      
+
+		-- prepare the HID buffer		
+				
+			
+			-- Send the 8 byte packet over USB to the host.
+			usb_send_data(USB_HID_ENDPOINT, hid_report_in, count( hid_report_in ) , low )
+
+			-- debounce
+			delay_1ms(50)
+    end if
+end loop
+
+
+
+
